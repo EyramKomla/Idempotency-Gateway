@@ -74,11 +74,6 @@ const idempotencyMiddleware = async (req, res, next) => {
         return originalJson.call(this, body);
     };
 
-    // Note: express res.json calls res.send, so intercepting one might be enough or tricky depending on implementation.
-    // But usually overriding res.json is safer if we know we only send JSON.
-    // If we want to be safe, we can override res.send too, but parsing body might be needed.
-    // Given the requirements "The response body accepts a JSON object", intercepting res.json is appropriate.
-
     next();
 };
 
