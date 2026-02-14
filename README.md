@@ -1,133 +1,150 @@
-# Idempotency-Gateway (The "Pay-Once" Protocol)
-This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.
+# Idempotency Gateway
 
-## 1. Business Context
-> **Client:** *FinSafe Transactions Ltd.* (A fast-growing Payment Processor).
+A robust implementation of an **Idempotency Layer** for payment processing, ensuring that requests are processed exactly once regardless of network retries or duplicates.
 
-### The Problem
-FinSafe's clients (e-commerce shops) occasionally experience network timeouts. When this happens, their servers automatically retry sending payment requests. Recently, this has led to a critical issue: **Double Charging**.
+## 1. Architecture Diagram
 
-If a customer clicks "Pay," the request is sent, but the network lags. The client retries the request. FinSafe processes *both* requests, charging the customer twice. This is causing customer churn and regulatory headaches.
+The following sequence diagram illustrates the flow of a request through the Idempotency Gateway:
 
-### The Solution
-FinSafe needs you to build an **Idempotency Layer**. This is a middleware service (or API) that ensures no matter how many times a client sends the same request, the payment is processed **exactly once**.
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Middleware as Idempotency Middleware
+    participant Store as In-Memory Store
+    participant Service as Payment Service
 
----
+    Client->>Middleware: POST /process-payment (Key, Body)
+    Middleware->>Store: Check Idempotency-Key
+    
+    alt New Request (Key not found)
+        Middleware->>Store: Create Entry (Status: PROCESSING)
+        Middleware->>Service: Process Payment (2s delay)
+        Service-->>Middleware: Payment Result
+        Middleware->>Store: Update Entry (Status: COMPLETED, Response)
+        Middleware-->>Client: 201 Created (Result)
+    
+    else Duplicate Request (Status: COMPLETED)
+        Middleware->>Store: Retrieve Saved Response
+        alt Body Hash Matches
+            Store-->>Middleware: Saved Response
+            Middleware-->>Client: 201 Created (Cached, X-Cache-Hit: true)
+        else Body Hash Mismatch
+            Middleware-->>Client: 422 Unprocessable Entity
+        end
 
-## 2. Technical Objective
-Build a RESTful API that mimics a payment processing backend. It must check for a unique `Idempotency-Key` in the HTTP headers.
+    else Concurrent Request (Status: PROCESSING)
+        Middleware->>Middleware: Wait for Completion (Event Emitter)
+        Middleware-->>Client: 201 Created (Cached, X-Cache-Hit: true)
+    end
+```
 
-* **First Request:** Process the payment and save the response.
-* **Duplicate Request:** Detect the existing key and return the *saved* response immediately, without processing the payment again.
+## 2. Setup Instructions
 
+### Prerequisites
+- Node.js (v14+ recommended)
+- npm
 
----
+### Installation
+1.  **Clone the repository** (or fork):
+    ```bash
+    git clone <repository-url>
+    cd Idempotency-Gateway
+    ```
 
-## 3. Getting Started
+2.  **Install dependencies**:
+    ```bash
+    npm install
+    ```
 
-1.  **Fork this Repository:** Do not clone it directly. Create a fork to your own GitHub account.
-2.  **Environment:** You may use **Node.js, Python, Java or Go, etc.**. You may use any database or in-memory store (Redis, SQLite, or a simple native Map/Dictionary variable).
-3.  **Submission:** Your final submission will be a link to your forked repository containing the source code and documentation.
+### Running the Server
+- **Start the server**:
+    ```bash
+    npm start
+    ```
+    The server will run on `http://localhost:8080`.
 
----
+- **Development mode** (with nodemon):
+    ```bash
+    npm run dev
+    ```
 
-## 4. The Architecture Diagram 
-**Task:** Before you write any code, you must design the logic flow.
-**Deliverable:** A **Sequence Diagram** or **Flowchart** included in your README.
+### verification
+To verify the implementation, you can run the included verification script while the server is running:
+```bash
+node verify.js
+```
+This script runs 4 tests:
+1.  **Happy Path**: Standard successful payment.
+2.  **Duplicate Request**: Verifies idempotency (returns cached response).
+3.  **Body Mismatch**: Ensures different payloads with the same key are rejected.
+4.  **Concurrent Requests**: Ensures simultaneous requests with the same key are handled correctly (second request waits for first).
 
----
+## 3. API Documentation
 
-## 5. User Stories & Acceptance Criteria
+### `POST /process-payment`
 
-### User Story 1: The First Transaction (Happy Path)
-**As a** client system (e.g., an online store),  
-**I want to** send a payment request with a unique ID,  
-**So that** my transaction is processed successfully.
+Processes a payment. Requires an `Idempotency-Key` header.
 
-**Acceptance Criteria:**
-- [ ] The API accepts a `POST` request to endpoint `/process-payment`.
-- [ ] The request header must contain `Idempotency-Key: <some-unique-string>`.
-- [ ] The request body accepts a JSON object (e.g., `{"amount": 100, "currency": "GHS"}`).
-- [ ] The server simulates processing (e.g., a 2-second delay) and returns a `200 OK` or `201 Created` response.
-- [ ] The response body should include a status message: `"Charged 100 GHS"`.
+#### Headers
+| Header | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `Idempotency-Key` | `string` | Yes | A unique identifier for the request (e.g., UUID). |
 
-### User Story 2: The Duplicate Attempt (Idempotency Logic)
-**As a** client system,  
-**I want to** safely retry a request if I don't hear back,  
-**So that** I don't accidentally double-charge the user.
+#### Request Body
+```json
+{
+  "amount": 100,
+  "currency": "GHS"
+}
+```
 
-**Acceptance Criteria:**
-- [ ] If the client sends a second `POST` request with the **same** `Idempotency-Key` and payload:
-    - [ ] The server must **NOT** run the processing logic again (no 2-second delay).
-    - [ ] The server must return the **exact same** response body and status code as the first successful request.
-    - [ ] The server returns a header `X-Cache-Hit: true` to indicate this was a replayed response.
+#### Responses
 
-### User Story 3: Different Request, Same Key (Fraud/Error Check)
-**As a** security officer,  
-**I want to** reject requests that reuse keys for different payments,  
-**So that** we maintain data integrity.
+**201 Created (Success)**
+```json
+{
+  "success": true,
+  "message": "Charged 100 GHS",
+  "transactionId": "txn_1700000000000"
+}
+```
 
-**Acceptance Criteria:**
-- [ ] If a request arrives with an existing `Idempotency-Key` but a **different** request body (e.g., changing amount from 100 to 500):
-    - [ ] The server must return a `422 Unprocessable Entity` or `409 Conflict` error.
-    - [ ] The error message should state: `"Idempotency key already used for a different request body."`
+**201 Created (Idempotent Replay)**
+Header: `X-Cache-Hit: true`
+```json
+{
+  "success": true,
+  "message": "Charged 100 GHS",
+  "transactionId": "txn_1700000000000"
+}
+```
 
----
+**422 Unprocessable Entity (Body Mismatch)**
+```json
+{
+  "error": "Idempotency key already used for a different request body."
+}
+```
 
-## 6. Bonus User Story (The "In-Flight" Check)
-**As a** system architect,  
-**I want to** handle cases where two identical requests arrive at the exact same time,  
-**So that** we don't succumb to race conditions.
+**400 Bad Request**
+```json
+{
+  "error": "Idempotency-Key header is missing"
+}
+```
 
-**Scenario:** Request A arrives. While Request A is still "processing" (during the 2-second delay), Request B (same key) arrives.
+## 4. Design Decisions
 
-**Acceptance Criteria:**
-- [ ] Request B should not start a new process.
-- [ ] Request B should not return `409 Conflict`.
-- [ ] Request B should wait (block) until Request A finishes, and then return the result of Request A.
+### In-Memory Storage
+For simplicity and speed, a Javascript `Map` is used as the key-value store. In a production environment, this should be replaced with a distributed store like **Redis** to support multiple server instances and persistence.
 
----
+### Concurrency Handling
+To handle the "Pre-Flight" or concurrent request scenario (Bonus User Story), the system uses an **Event Emitter**.
+- If a request comes in with a key that is currently `PROCESSING`, the new request subscribes to a `completed` event for that key.
+- Once the initial request finishes, it emits the event, and all waiting requests receive the saved response immediately.
 
-## 7. The "Developer's Choice" Challenge
-We believe great engineers are also product thinkers.
+### Body Hashing
+To ensure data integrity, the request body is hashed (SHA-256) and stored with the key. If a subsequent request uses the same key but a different body hash, it is rejected to prevent fraud or errors.
 
-**Task:** Identify **one** additional feature or safety mechanism that would make this system better for a real-world Fintech company.
-1.  **Implement it.**
-2.  **Document it:** Explain *why* you added it in your README.
-
----
-
-## 8. Documentation Requirements
-Your final `README.md` must replace these instructions. It must cover:
-
-1.  **Architecture Diagram**
-2.  **Setup Instructions**
-3.  **API Documentation** 
-4.  **Design Decisions** 
-5.  **The Developer's Choice:** Description of the extra feature you added.
-
----
-Submit your repo link via the [online](https://forms.office.com/e/rGKtfeZCsH) form.
-
----
-## 🛑 Pre-Submission Checklist
-**WARNING:** Before you submit your solution, you **MUST** pass every item on this list.
-If you miss any of these critical steps, your submission will be **automatically rejected** and you will **NOT** be invited to an interview.
-
-### 1. 📂 Repository & Code
-- [ ] **Public Access:** Is your GitHub repository set to **Public**? (We cannot review private repos).
-- [ ] **Clean Code:** Did you remove unnecessary files (like `node_modules`, `.env` with real keys, or `.DS_Store`)?
-- [ ] **Run Check:** if we clone your repo and run `npm start` (or equivalent), does the server start immediately without crashing?
-
-### 2. 📄 Documentation (Crucial)
-- [ ] **Architecture Diagram:** Did you include a visual Diagram (Flowchart or Sequence Diagram) in the README?
-- [ ] **README Swap:** Did you **DELETE** the original instructions (the problem brief) from this file and replace it with your own documentation?
-- [ ] **API Docs:** Is there a clear list of Endpoints and Example Requests in the README?
-
-
-### 3. 🧹 Git Hygiene
-- [ ] **Commit History:** Does your repo have multiple commits with meaningful messages? (A single "Initial Commit" is a red flag).
-
----
-**Ready?**
-If you checked all the boxes above, submit your repository link in the application form. Good luck! 🚀
+## 5. Developer's Choice
+*Feature implementation coming soon.*
