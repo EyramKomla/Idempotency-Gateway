@@ -1,7 +1,7 @@
 {
   "name": "idempotency-gateway",
   "version": "1.0.0",
-  "description": "This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.",
+  "description": "A robust idempotency gateway for payment processing that prevents duplicate charges and ensures exactly-once processing",
   "main": "index.js",
   "scripts": {
     "start": "node src/server.js",

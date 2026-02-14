@@ -146,5 +146,22 @@ To handle the "Pre-Flight" or concurrent request scenario (Bonus User Story), th
 ### Body Hashing
 To ensure data integrity, the request body is hashed (SHA-256) and stored with the key. If a subsequent request uses the same key but a different body hash, it is rejected to prevent fraud or errors.
 
-## 5. Developer's Choice
-*Feature implementation coming soon.*
+## 5. Developer's Choice: Request Expiration (TTL)
+
+### Feature: Automatic Record Expiration
+To prevent memory bloat and ensure the system remains performant in production, idempotency records automatically expire after **1 hour**.
+
+### How It Works
+- When a payment request is processed, the timestamp is recorded.
+- On subsequent requests with the same key, the system checks if the record is older than 1 hour.
+- Expired records are automatically deleted from the store.
+- After expiration, the same idempotency key can be reused for a new payment.
+
+### Why This Matters for Production
+1. **Memory Management**: Without TTL, the in-memory store would grow indefinitely, eventually causing memory issues.
+2. **Realistic Use Case**: In practice, clients retry failed requests within seconds or minutes, not hours.
+3. **Security**: Prevents indefinite key reservation that could be exploited.
+4. **Scalability**: Keeps the store size bounded and predictable.
+
+### Configuration
+The TTL is set to 1 hour (3,600,000 milliseconds) and can be adjusted in `src/middleware/idempotency.middleware.js`.
